@@ -676,17 +676,8 @@ decode_inet(const char* buffer, unsigned int buff_size, unsigned int* out_size)
             unsigned char bits;
             unsigned char ipaddr[4];
         } inet;
-/*	
-        const char* new_buffer = (const char*)TYPEALIGN(sizeof(int32), (uintptr_t)buffer);
-	unsigned int delta = (unsigned int)( (uintptr_t)new_buffer - (uintptr_t)buffer );
-
-	if(buff_size < delta)
-		return -1;
-
-	buff_size -= delta;
-	buffer = new_buffer;
-*/
-	if(buff_size < sizeof(inet))
+	
+        if(buff_size < sizeof(inet))
 		return -2;
 
 	memcpy(&inet, buffer, sizeof(inet));
