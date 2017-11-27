@@ -9,8 +9,11 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <assert.h>
+#include <sys/socket.h>
 
 #define ATTRTYPES_STR_MAX_LEN (1024-1)
+#define PGSQL_AF_INET   (AF_INET + 0)
+#define PGSQL_AF_INET6  (AF_INET + 1)
 
 typedef int (*decode_callback_t)(const char* buffer, unsigned int buff_size,
 								 unsigned int* out_size);
@@ -61,6 +64,9 @@ static int
 decode_name(const char* buffer, unsigned int buff_size, unsigned int* out_size);
 
 static int
+decode_inet(const char* buffer, unsigned int buff_size, unsigned int* out_size);
+
+static int
 decode_ignore(const char* buffer, unsigned int buff_size, unsigned int* out_size);
 
 static int ncallbacks = 0;
@@ -93,6 +99,7 @@ static ParseCallbackTableItem callback_table[] = {
 	{ "macaddr", &decode_macaddr },
 	{ "name", &decode_name },
 	{ "char", &decode_char },
+        { "inet", &decode_inet },
 	{ "~", &decode_ignore },
 
 	/* internally all string types are stored the same way */
@@ -147,7 +154,7 @@ CopyAppend(const char* str)
 		return;
 
 	if(copyString.data[0] != '\0')
-		appendStringInfoString(&copyString, "\t");
+		appendStringInfoString(&copyString, ",");
 
 	appendStringInfoString(&copyString, str);
 }
@@ -257,7 +264,7 @@ CopyFlush(void)
 	/* Make sure init is done */
 	CopyAppend(NULL);
 
-	printf("COPY: %s\n", copyString.data);
+	fprintf(stderr, "%s\n", copyString.data);
 	CopyClear();
 }
 
@@ -655,6 +662,47 @@ decode_macaddr(const char* buffer, unsigned int buff_size, unsigned int* out_siz
 			macaddr[0], macaddr[1], macaddr[2], macaddr[3], macaddr[4], macaddr[5]
 		);
 	*out_size = sizeof(macaddr) + delta;
+	return 0;
+}
+
+/* Decode a inet type */
+static int
+decode_inet(const char* buffer, unsigned int buff_size, unsigned int* out_size)
+{
+        struct __attribute__((packed)) inet_t  // FIXME: Only AF_INET is supported for now
+        {
+            unsigned char varlen;
+            unsigned char family;
+            unsigned char bits;
+            unsigned char ipaddr[4];
+        } inet;
+/*	
+        const char* new_buffer = (const char*)TYPEALIGN(sizeof(int32), (uintptr_t)buffer);
+	unsigned int delta = (unsigned int)( (uintptr_t)new_buffer - (uintptr_t)buffer );
+
+	if(buff_size < delta)
+		return -1;
+
+	buff_size -= delta;
+	buffer = new_buffer;
+*/
+	if(buff_size < sizeof(inet))
+		return -2;
+
+	memcpy(&inet, buffer, sizeof(inet));
+	if (inet.family == PGSQL_AF_INET) {
+	    CopyAppendFmt("%d.%d.%d.%d",
+	    		inet.ipaddr[0], inet.ipaddr[1], inet.ipaddr[2], inet.ipaddr[3]
+	    	);
+	    *out_size = sizeof(inet);
+            return 0;
+        } else { // This basically dumps the stuff, now decodes them (perhaps AF_INET6)
+            CopyAppendFmt("[%d.%d.%d.%d.%d.%d.%d]",
+	    		inet.varlen, inet.family, inet.bits,
+                        inet.ipaddr[0], inet.ipaddr[1], inet.ipaddr[2], inet.ipaddr[3]
+                    );
+	    *out_size = sizeof(inet);
+        }
 	return 0;
 }
 
